@@ -1,0 +1,83 @@
+name: Build HUNTERICE ABYSS VST3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build-windows:
+    name: Build VST3 on Windows x64
+    runs-on: windows-2022
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup CMake
+        uses: lukka/get-cmake@latest
+
+      - name: Clean build directory
+        shell: pwsh
+        run: |
+          if (Test-Path build) { Remove-Item -Recurse -Force build }
+          Write-Host "Build directory cleaned"
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+
+      - name: Build Project
+        shell: pwsh
+        run: cmake --build build --config ${{ env.BUILD_TYPE }} --parallel
+
+      - name: Find and Verify VST3
+        shell: pwsh
+        run: |
+          $vst3 = Get-ChildItem -Path build -Recurse -Filter "*.vst3" | Select-Object -First 1
+          if ($vst3) {
+            Write-Host "VST3 found: $($vst3.FullName)"
+            Write-Host "Size: $($vst3.Length) bytes"
+            "VST3_PATH=$($vst3.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } else {
+            Write-Error "VST3 file not found!"
+            exit 1
+          }
+
+      - name: Prepare Artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "artifacts" | Out-Null
+          Copy-Item -Path "$env:VST3_PATH" -Destination "artifacts" -Recurse
+
+      - name: Create ZIP Archive
+        working-directory: artifacts
+        shell: pwsh
+        run: |
+          $zip = "HUNTERICE-ABYSS-VST3-Windows-x64.zip"
+          Compress-Archive -Path "*.vst3" -DestinationPath $zip -Force
+          Write-Host "Created: $zip"
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HUNTERICE-ABYSS-VST3-Windows-x64
+          path: artifacts/*.zip
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Build Summary
+        if: success()
+        shell: pwsh
+        run: |
+          Write-Host "=========================================="
+          Write-Host "BUILD SUCCESSFUL"
+          Write-Host "Plugin: HUNTERICE ABYSS"
+          Write-Host "Platform: Windows x64"
+          Write-Host "Format: VST3"
+          Write-Host "=========================================="
